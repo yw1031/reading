@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>학급 독서기록장</title>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; background: #f4f6fa; margin: 0; padding: 0; }
+        .main-layout { display: flex; min-height: 100vh; }
+        .sidebar { width: 140px; background: #2d5c8a; color: #fff; display: flex; flex-direction: column; align-items: stretch; padding-top: 40px; }
+        .menu-btn { background: none; border: none; color: #fff; font-size: 1.1em; padding: 18px 0; cursor: pointer; transition: background 0.2s; text-align: left; padding-left: 24px; }
+        .menu-btn.active, .menu-btn:hover { background: #1b3c5a; }
+        .container { flex: 1; max-width: 600px; margin: 40px auto; background: #fff; border-radius: 12px; box-shadow: 0 2px 8px #0001; padding: 32px; }
+        h1 { text-align: center; color: #2d5c8a; }
+        form { display: flex; flex-direction: column; gap: 12px; margin-bottom: 24px; }
+        label { font-weight: bold; }
+        input, textarea { padding: 8px; border: 1px solid #b0c4de; border-radius: 6px; font-size: 1em; }
+        label > textarea#review {
+            width: 100%;
+            min-width: 100%;
+            max-width: 100%;
+            min-height: 200px;
+            height: 200px;
+            resize: vertical;
+            box-sizing: border-box;
+        }
+        button { background: #2d5c8a; color: #fff; border: none; padding: 10px; border-radius: 6px; font-size: 1em; cursor: pointer; transition: background 0.2s; }
+        button:hover { background: #1b3c5a; }
+        .record-list { margin-top: 24px; }
+        .record { background: #eaf1fb; border-radius: 8px; padding: 12px; margin-bottom: 12px; }
+        .record strong { color: #2d5c8a; }
+        .hidden { display: none !important; }
+        .star {
+            font-size: 1.5em;
+            color: #b0c4de;
+            cursor: pointer;
+            transition: color 0.2s;
+            user-select: none;
+        }
+        .star.selected, .star.hover {
+            color: #ffd700;
+        }
+    </style>
+    <!-- Firebase SDK 추가 (head 태그 내에 삽입) -->
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+    <script>
+        // Firebase 설정 (아래를 본인 프로젝트 정보로 교체)
+        const firebaseConfig = {
+            apiKey: "YOUR_API_KEY",
+            authDomain: "YOUR_AUTH_DOMAIN",
+            databaseURL: "YOUR_DATABASE_URL",
+            projectId: "YOUR_PROJECT_ID",
+            storageBucket: "YOUR_STORAGE_BUCKET",
+            messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
+            appId: "YOUR_APP_ID"
+        };
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.database();
+        const RECORDS_PATH = 'readingRecords';
+
+        const form = document.getElementById('readingForm');
+        const recordList = document.getElementById('recordList');
+        const starRating = document.getElementById('starRating');
+        const myScoreInput = document.getElementById('myScore');
+        let currentScore = 3;
+
+        // 별점 기능
+        if (starRating) {
+            const stars = starRating.querySelectorAll('.star');
+            function setStars(score) {
+                stars.forEach((star, idx) => {
+                    if (idx < score) star.classList.add('selected');
+                    else star.classList.remove('selected');
+                });
+            }
+            setStars(currentScore);
+            stars.forEach((star, idx) => {
+                star.addEventListener('mouseenter', () => setStars(idx + 1));
+                star.addEventListener('mouseleave', () => setStars(currentScore));
+                star.addEventListener('click', () => {
+                    currentScore = idx + 1;
+                    myScoreInput.value = currentScore;
+                    setStars(currentScore);
+                });
+            });
+        }
+
+        // 기록 불러오기 (공유)
+        function loadRecords() {
+            db.ref(RECORDS_PATH).once('value', (snapshot) => {
+                const records = [];
+                snapshot.forEach(child => {
+                    const rec = child.val();
+                    rec._key = child.key;
+                    records.push(rec);
+                });
+                renderRecordList(records);
+            });
+        }
+
+        function renderRecordList(records) {
+            recordList.innerHTML = '';
+            records.forEach((rec, idx) => {
+                const div = document.createElement('div');
+                div.className = 'record';
+                div.innerHTML = `
+                    <strong>${rec.studentName}</strong> | <em>${rec.bookTitle}</em> (${rec.author})<br>
+                    <small>읽은 날짜: ${rec.dateRead}</small> | <span>나의 점수: ${'★'.repeat(rec.myScore || 0)}${'☆'.repeat(5 - (rec.myScore || 0))}</span><br>
+                    <div>감상평: ${rec.review}</div>
+                    <button class="delete-btn" data-key="${rec._key}">삭제</button>
+                `;
+                recordList.appendChild(div);
+            });
+            // 삭제 버튼 이벤트 등록
+            document.querySelectorAll('.delete-btn').forEach(btn => {
+                btn.onclick = function() {
+                    const key = this.getAttribute('data-key');
+                    const inputPw = prompt('이 기록을 삭제하려면 비밀번호를 입력하세요:');
+                    db.ref(RECORDS_PATH + '/' + key).once('value', snap => {
+                        const rec = snap.val();
+                        if (!rec) return alert('기록이 이미 삭제되었습니다.');
+                        if (inputPw === '1031' || inputPw === rec.password) {
+                            db.ref(RECORDS_PATH + '/' + key).remove().then(loadRecords);
+                        } else {
+                            alert('비밀번호가 일치하지 않습니다.');
+                        }
+                    });
+                };
+            });
+        }
+
+        // 기록 추가
+        form.onsubmit = function(e) {
+            e.preventDefault();
+            const passwordInput = document.getElementById('password').value;
+            const record = {
+                studentName: document.getElementById('studentName').value.trim(),
+                bookTitle: document.getElementById('bookTitle').value.trim(),
+                author: document.getElementById('author').value.trim(),
+                dateRead: document.getElementById('dateRead').value,
+                myScore: document.getElementById('myScore').value,
+                review: document.getElementById('review').value.trim(),
+                password: passwordInput ? passwordInput : '0000'
+            };
+            db.ref(RECORDS_PATH).push(record).then(() => {
+                form.reset();
+                // 별점 초기화
+                if (starRating) {
+                    currentScore = 3;
+                    myScoreInput.value = 3;
+                    starRating.querySelectorAll('.star').forEach((star, idx) => {
+                        if (idx < 3) star.classList.add('selected');
+                        else star.classList.remove('selected');
+                    });
+                }
+                loadRecords();
+            });
+        };
+
+        // 메뉴 버튼 및 페이지 전환
+        const menuInput = document.getElementById('menuInput');
+        const menuView = document.getElementById('menuView');
+        const menuStats = document.getElementById('menuStats');
+        const formEl = document.getElementById('readingForm');
+        const recordListEl = document.getElementById('recordList');
+        const statsView = document.getElementById('statsView');
+
+        function showInputPage() {
+            menuInput.classList.add('active');
+            menuView.classList.remove('active');
+            menuStats.classList.remove('active');
+            formEl.classList.remove('hidden');
+            recordListEl.classList.add('hidden');
+            statsView.classList.add('hidden');
+        }
+        function showViewPage() {
+            menuInput.classList.remove('active');
+            menuView.classList.add('active');
+            menuStats.classList.remove('active');
+            formEl.classList.add('hidden');
+            recordListEl.classList.remove('hidden');
+            statsView.classList.add('hidden');
+            loadRecords();
+        }
+        function showStatsPage() {
+            menuInput.classList.remove('active');
+            menuView.classList.remove('active');
+            menuStats.classList.add('active');
+            formEl.classList.add('hidden');
+            recordListEl.classList.add('hidden');
+            statsView.classList.remove('hidden');
+            renderStats();
+        }
+        menuInput.onclick = showInputPage;
+        menuView.onclick = showViewPage;
+        menuStats.onclick = showStatsPage;
+        // 기본은 입력 페이지
+        showInputPage();
+
+        // 통계 렌더링 (공유 데이터 기반)
+        function renderStats() {
+            db.ref(RECORDS_PATH).once('value', (snapshot) => {
+                const records = [];
+                snapshot.forEach(child => {
+                    const rec = child.val();
+                    records.push(rec);
+                });
+                // 책별 점수 평균 계산
+                const bookScores = {};
+                records.forEach(r => {
+                    if (!bookScores[r.bookTitle]) bookScores[r.bookTitle] = { total: 0, count: 0 };
+                    bookScores[r.bookTitle].total += Number(r.myScore || 0);
+                    bookScores[r.bookTitle].count += 1;
+                });
+                const bookAvgArr = Object.entries(bookScores).map(([title, obj]) => ({
+                    title,
+                    avg: obj.count ? (obj.total / obj.count) : 0,
+                    count: obj.count
+                })).filter(b => b.count >= 1);
+                bookAvgArr.sort((a, b) => b.avg - a.avg);
+                // 학생별 독서량 계산
+                const studentCounts = {};
+                records.forEach(r => {
+                    if (!studentCounts[r.studentName]) studentCounts[r.studentName] = 0;
+                    studentCounts[r.studentName] += 1;
+                });
+                const studentArr = Object.entries(studentCounts).map(([name, cnt]) => ({ name, cnt }));
+                studentArr.sort((a, b) => b.cnt - a.cnt);
+                // HTML 출력
+                let html = '<h2>우리 반 통계</h2>';
+                html += '<div style="display: flex; gap: 32px; flex-wrap: wrap; justify-content: center;">';
+                html += '<div style="flex:1; min-width:220px;">';
+                html += '<h3>후기가 가장 좋은 책 TOP3</h3>';
+                html += '<ol style="list-style:none; padding:0;">';
+                const medalColors = ['#ffd700', '#c0c0c0', '#cd7f32'];
+                for (let i = 0; i < 3; i++) {
+                    const b = bookAvgArr[i];
+                    html += `<li style="margin-bottom:10px;display:flex;align-items:center;gap:8px;">
+                        <span style="display:inline-block;width:1.8em;text-align:center;font-weight:bold;color:${medalColors[i]}">${i+1}</span>`;
+                    if (b) {
+                        html += `<span><strong>${b.title}</strong> (평균 점수: ${b.avg.toFixed(2)}, 기록 수: ${b.count})</span>`;
+                    } else {
+                        html += `<span style='color:#aaa;'>-</span>`;
+                    }
+                    html += '</li>';
+                }
+                html += '</ol>';
+                html += '</div>';
+                html += '<div style="flex:1; min-width:220px;">';
+                html += '<h3>우리 반 다독왕</h3>';
+                html += '<ol style="list-style:none; padding:0;">';
+                for (let i = 0; i < 3; i++) {
+                    const s = studentArr[i];
+                    html += `<li style="margin-bottom:10px;display:flex;align-items:center;gap:8px;">
+                        <span style="display:inline-block;width:1.8em;text-align:center;font-weight:bold;color:${medalColors[i]}">${i+1}</span>`;
+                    if (s) {
+                        html += `<span><strong>${s.name}</strong> (${s.cnt}권)</span>`;
+                    } else {
+                        html += `<span style='color:#aaa;'>-</span>`;
+                    }
+                    html += '</li>';
+                }
+                html += '</ol>';
+                html += '</div>';
+                html += '</div>';
+                statsView.innerHTML = html;
+            });
+        }
+
+        // 최초 로딩시 내 기록(공유) 불러오기
+        loadRecords();
+    </script>
+</head>
+<body>
+    <div class="main-layout">
+        <nav class="sidebar">
+            <button class="menu-btn active" id="menuInput">나의 독서 기록</button>
+            <button class="menu-btn" id="menuView">우리 반의 독서 기록</button>
+            <button class="menu-btn" id="menuStats">우리 반 통계</button>
+        </nav>
+        <div class="container">
+            <h1>학급 독서기록장</h1>
+            <form id="readingForm">
+                <div style="display: flex; gap: 12px; align-items: center;">
+                    <label style="flex:1;">이름 <input type="text" id="studentName" required></label>
+                    <label style="flex:1;">비밀번호 <input type="password" id="password" required autocomplete="new-password"></label>
+                </div>
+                <div style="display: flex; gap: 12px; align-items: center;">
+                    <label style="flex:1.2; display: flex; align-items: center; gap: 6px;">책 제목 <input type="text" id="bookTitle" required style="flex:1;"></label>
+                    <label style="flex:1; display: flex; align-items: center; gap: 6px;">저자 <input type="text" id="author" required style="flex:1;"></label>
+                </div>
+                <div style="margin-bottom: 8px; color: #222; font-size:0.98em;">
+                    책 제목과 저자를 모를 경우엔 여기로! <a href="https://www.nl.go.kr/seoji/" target="_blank" style="color:#2d5c8a; text-decoration:underline;">isbn 납본 시스템</a>
+                </div>
+                <div style="display: flex; gap: 12px; align-items: center;">
+                    <label style="flex:1.2;">읽은 날짜 <input type="date" id="dateRead" required></label>
+                    <label style="flex:1; display: flex; align-items: center; gap: 6px;">나의 점수
+                        <span id="starRating">
+                            <input type="hidden" id="myScore" name="myScore" value="3">
+                            <span class="star" data-value="1">★</span>
+                            <span class="star" data-value="2">★</span>
+                            <span class="star" data-value="3">★</span>
+                            <span class="star" data-value="4">★</span>
+                            <span class="star" data-value="5">★</span>
+                        </span>
+                    </label>
+                </div>
+                <label>감상평 <textarea id="review" required></textarea></label>
+                <button type="submit">기록 추가</button>
+            </form>
+            <div class="record-list" id="recordList"></div>
+            <div class="record-list hidden" id="statsView"></div>
+        </div>
+    </div>
+</body>
+</html>
